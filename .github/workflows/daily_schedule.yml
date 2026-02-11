@@ -1,0 +1,33 @@
+name: Seongnam Land Transaction Bot
+
+on:
+  schedule:
+    # 매일 한국 시간 오전 9시 (UTC 00:00) 실행
+    - cron: '0 0 * * *'
+  # 수동 실행 옵션 (테스트용)
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 저장소 코드 체크아웃
+      uses: actions/checkout@v3
+
+    - name: 파이썬 설정 (3.9)
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: 라이브러리 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 봇 실행
+      env:
+        # GitHub 저장소 설정(Secrets)에 등록된 변수 주입
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+      run: python land_transaction_bot.py
