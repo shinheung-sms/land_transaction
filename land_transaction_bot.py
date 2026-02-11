@@ -5,6 +5,7 @@ import sys
 import re
 import os
 import urllib3
+from typing import Optional
 
 # SSL 인증서 검증 경고 숨기기
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -58,7 +59,7 @@ class LandTransactionNotifier:
         dates.insert(0, datetime.now().strftime("%Y-%m-%d"))
         return dates
 
-    def fetch_page(self, search_keyword: str, page_no: int = 1) -> str | None:
+    def fetch_page(self, search_keyword: str, page_no: int = 1) -> Optional[str]:
         """웹사이트에서 HTML 가져오기"""
         
         # =====================================================================
