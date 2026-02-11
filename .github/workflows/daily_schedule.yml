@@ -6,6 +6,8 @@ on:
     - cron: '0 0 * * *'
   # 수동 실행 옵션 (테스트용)
   workflow_dispatch:
+  # 코드가 수정되어 푸시될 때마다 즉시 실행 (테스트용)
+  push:
 
 jobs:
   run-bot:
