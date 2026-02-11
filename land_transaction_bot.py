@@ -46,9 +46,9 @@ class LandTransactionNotifier:
     def get_target_dates(self) -> list:
         """
         어제 날짜뿐 아니라 최근 3일치 날짜를 반환.
-        
-        [근거] GitHub Actions cron은 UTC 기준이라 한국시간(KST=UTC+9)과 
-        최대 1일 차이가 발생할 수 있음. 또한 주말/공휴일에는 게시가 
+
+        [근거] GitHub Actions cron은 UTC 기준이라 한국시간(KST=UTC+9)과
+        최대 1일 차이가 발생할 수 있음. 또한 주말/공휴일에는 게시가
         안 될 수 있어 전날만 체크하면 누락됨.
         """
         dates = []
@@ -60,129 +60,151 @@ class LandTransactionNotifier:
         return dates
 
     def fetch_page(self, search_keyword: str, page_no: int = 1) -> Optional[str]:
-        """웹사이트에서 HTML 가져오기"""
-        
-        # =====================================================================
-        # [핵심 수정 1] GET과 POST 모두 시도
-        # 
-        # 공공기관 게시판은 GET/POST 방식이 혼용됨.
-        # 기존 코드는 GET만 사용 → POST로 동작하는 경우 검색 결과가 안 나옴.
-        # =====================================================================
-        
-        # GET 방식 파라미터
-        get_params = {
+        """웹사이트에서 HTML 가져오기
+
+        성남시 정보목록 사이트는 테이블 데이터를 AJAX로 동적 로딩함.
+        X-Requested-With: XMLHttpRequest 헤더를 포함해야 데이터가 포함된
+        HTML 응답을 받을 수 있음.
+        """
+
+        params = {
             'menuIdx': self.menu_idx,
             'searchCondition': '1',
             'searchKeyword': search_keyword,
             'pageIndex': str(page_no),
         }
-        
+
+        # AJAX 요청 헤더 (핵심: 서버가 이 헤더를 보고 데이터 포함 여부 결정)
+        ajax_headers = {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html, */*; q=0.01',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        }
+
         try:
-            # 1차: GET 방식 시도
-            resp = self.session.get(
-                self.base_url, params=get_params, 
-                timeout=15, verify=False
-            )
-            resp.raise_for_status()
-            
-            # 인코딩 자동 감지 보정
-            if resp.encoding and resp.encoding.lower() != 'utf-8':
-                resp.encoding = 'utf-8'
-            
-            html = resp.text
-            
-            # GET 결과에 실제 데이터가 있는지 확인
-            if self._has_results(html):
-                print(f"[*] GET 방식 성공 (page={page_no})")
-                return html
-            
-            # 2차: POST 방식 시도
-            post_data = {
-                'menuIdx': self.menu_idx,
-                'searchCondition': '1',
-                'searchKeyword': search_keyword,
-                'pageIndex': str(page_no),
-                'returnURL': '/main.do',
-            }
+            # 1차: AJAX POST (가장 유력한 방식)
             resp = self.session.post(
-                self.base_url, data=post_data,
+                self.base_url, data=params,
+                headers=ajax_headers,
                 timeout=15, verify=False
             )
             resp.raise_for_status()
-            
             if resp.encoding and resp.encoding.lower() != 'utf-8':
                 resp.encoding = 'utf-8'
-            
             html = resp.text
             if self._has_results(html):
-                print(f"[*] POST 방식 성공 (page={page_no})")
+                print(f"[*] AJAX POST 방식 성공 (page={page_no})")
                 return html
-            
-            # 3차: 검색 파라미터명 변형 시도 (searchWord 등)
+            print(f"[!] AJAX POST: 데이터 없음 (응답 길이={len(html)})")
+
+            # 2차: AJAX GET
+            resp = self.session.get(
+                self.base_url, params=params,
+                headers=ajax_headers,
+                timeout=15, verify=False
+            )
+            resp.raise_for_status()
+            if resp.encoding and resp.encoding.lower() != 'utf-8':
+                resp.encoding = 'utf-8'
+            html = resp.text
+            if self._has_results(html):
+                print(f"[*] AJAX GET 방식 성공 (page={page_no})")
+                return html
+            print(f"[!] AJAX GET: 데이터 없음 (응답 길이={len(html)})")
+
+            # 3차: 일반 POST (AJAX 헤더 없이)
+            resp = self.session.post(
+                self.base_url, data=params,
+                timeout=15, verify=False
+            )
+            resp.raise_for_status()
+            if resp.encoding and resp.encoding.lower() != 'utf-8':
+                resp.encoding = 'utf-8'
+            html = resp.text
+            if self._has_results(html):
+                print(f"[*] 일반 POST 방식 성공 (page={page_no})")
+                return html
+
+            # 4차: 일반 GET
+            resp = self.session.get(
+                self.base_url, params=params,
+                timeout=15, verify=False
+            )
+            resp.raise_for_status()
+            if resp.encoding and resp.encoding.lower() != 'utf-8':
+                resp.encoding = 'utf-8'
+            html = resp.text
+            if self._has_results(html):
+                print(f"[*] 일반 GET 방식 성공 (page={page_no})")
+                return html
+
+            # 5차: 검색 파라미터명 변형 (searchWord)
             alt_params = {
                 'menuIdx': self.menu_idx,
                 'searchSelect': 'title',
                 'searchWord': search_keyword,
                 'pageIndex': str(page_no),
             }
-            resp = self.session.get(
-                self.base_url, params=alt_params,
-                timeout=15, verify=False
-            )
-            resp.raise_for_status()
-            
-            if resp.encoding and resp.encoding.lower() != 'utf-8':
-                resp.encoding = 'utf-8'
-            
-            html = resp.text
-            if self._has_results(html):
-                print(f"[*] 대체 파라미터(searchWord) 방식 성공 (page={page_no})")
-                return html
-            
-            # 결과가 없더라도 GET 응답은 반환 (파싱 시도용)
-            print(f"[!] 검색 결과가 비어있을 수 있음. GET 응답 반환.")
+            for method_name, req_func, req_kwargs in [
+                ('대체파라미터 AJAX POST', self.session.post,
+                 {'data': alt_params, 'headers': ajax_headers}),
+                ('대체파라미터 GET', self.session.get,
+                 {'params': alt_params}),
+            ]:
+                resp = req_func(
+                    self.base_url, timeout=15, verify=False, **req_kwargs
+                )
+                resp.raise_for_status()
+                if resp.encoding and resp.encoding.lower() != 'utf-8':
+                    resp.encoding = 'utf-8'
+                html = resp.text
+                if self._has_results(html):
+                    print(f"[*] {method_name} 방식 성공 (page={page_no})")
+                    return html
+
+            # 모든 방식 실패 시 마지막 응답 반환 (디버깅용)
+            print(f"[!] 모든 요청 방식에서 데이터를 찾지 못함.")
             return resp.text
-            
+
         except requests.exceptions.RequestException as e:
             print(f"[오류] 접속 실패: {e}")
             return None
 
     def _has_results(self, html: str) -> bool:
-        """HTML에 실제 게시물 데이터가 있는지 간단 체크"""
+        """HTML에 실제 게시물 데이터가 있는지 체크"""
+        # 날짜 패턴이 포함된 <td> 또는 날짜+제목이 있는 구조 탐지
         soup = BeautifulSoup(html, 'html.parser')
-        # 테이블에 실제 데이터 행이 있는지
-        tables = soup.find_all('table')
-        for table in tables:
-            rows = table.find_all('tr')
-            for row in rows:
-                tds = row.find_all('td')
-                if len(tds) >= 3:
-                    text = row.get_text()
-                    # 날짜 패턴이 포함된 행이 있으면 데이터 있음
-                    if re.search(r'\d{4}[-./]\d{2}[-./]\d{2}', text):
-                        return True
-        
-        # div/ul 기반 목록도 체크
-        for item in soup.select('ul li a, div.list a, div.board a'):
-            if re.search(r'\d{4}[-./]\d{2}[-./]\d{2}', item.parent.get_text()):
-                return True
-        
+
+        # 방법 1: 테이블에 <td>가 있고 날짜 패턴이 포함된 행
+        for row in soup.find_all('tr'):
+            tds = row.find_all('td')
+            if len(tds) >= 3:
+                text = row.get_text()
+                if re.search(r'\d{4}[-./]\d{1,2}[-./]\d{1,2}', text):
+                    return True
+
+        # 방법 2: div/span/dl 기반 목록에 날짜 패턴
+        for selector in ['ul li a', 'div.list a', 'div.board a',
+                         'dl dt a', 'div a']:
+            for item in soup.select(selector):
+                parent = item.parent
+                if parent and re.search(
+                    r'\d{4}[-./]\d{1,2}[-./]\d{1,2}', parent.get_text()
+                ):
+                    return True
+
+        # 방법 3: 전체 HTML에서 날짜 패턴 + <a> 태그 공존 여부
+        # (AJAX 응답이 HTML fragment일 수 있음)
+        has_dates = bool(re.search(r'\d{4}[-./]\d{1,2}[-./]\d{1,2}', html))
+        has_links = bool(soup.find('a'))
+        has_tds = bool(soup.find('td'))
+        if has_dates and has_links and has_tds:
+            return True
+
         return False
 
     def parse_results(self, html: str, target_dates: list) -> list:
-        """
-        HTML에서 게시물 제목과 날짜를 추출.
-        
-        [핵심 수정 2] 다양한 HTML 구조에 대응
-        
-        공공기관 게시판 구조는 크게 3가지:
-        1) table > tbody > tr > td (전통적 게시판)
-        2) ul > li (리스트형)
-        3) div 기반 (카드형/모던)
-        
-        기존 코드는 1번만 지원하고 컬럼 인덱스가 고정이라
-        실제 사이트 구조와 안 맞으면 데이터를 못 찾음.
-        """
+        """HTML에서 게시물 제목과 날짜를 추출."""
         soup = BeautifulSoup(html, 'html.parser')
         found_items = []
 
@@ -190,20 +212,19 @@ class LandTransactionNotifier:
         tables = soup.find_all('table')
         for table in tables:
             rows = table.find_all('tr')
-            
+
             # 헤더 행에서 컬럼 매핑 파악
             header_row = table.find('tr')
             col_map = self._detect_column_mapping(header_row)
-            
+
             for row in rows:
                 cols = row.find_all('td')
                 if not cols:
-                    continue  # 헤더 행(th) 스킵
-                
-                # 전체 행 텍스트
+                    continue
+
                 row_text = row.get_text(strip=True)
-                
-                # 제목 추출: <a> 태그 우선, 없으면 td 텍스트
+
+                # 제목 추출
                 title = ""
                 link_tag = row.find('a')
                 if link_tag:
@@ -211,24 +232,22 @@ class LandTransactionNotifier:
                 elif col_map.get('title_idx') is not None and col_map['title_idx'] < len(cols):
                     title = cols[col_map['title_idx']].get_text(strip=True)
                 else:
-                    # 가장 긴 텍스트를 가진 td를 제목으로 추정
                     title = max(
                         [td.get_text(strip=True) for td in cols],
                         key=len, default=""
                     )
-                
-                # 날짜 추출: 모든 td에서 날짜 패턴 검색
+
+                # 날짜 추출
                 date_text = ""
                 for col in cols:
                     txt = col.get_text(strip=True)
-                    # 다양한 날짜 형식 대응
                     date_match = re.search(
                         r'(\d{4}[-./]\d{1,2}[-./]\d{1,2})', txt
                     )
                     if date_match:
                         date_text = self._normalize_date(date_match.group(1))
                         break
-                
+
                 if title and date_text:
                     found_items.append({
                         'title': title,
@@ -240,7 +259,7 @@ class LandTransactionNotifier:
         list_selectors = [
             'ul.board_list li', 'ul.list_type li', 'ul.info_list li',
             'div.board_list li', 'div.result_list li',
-            'ul li',  # fallback
+            'ul li',
         ]
         for selector in list_selectors:
             items = soup.select(selector)
@@ -262,12 +281,37 @@ class LandTransactionNotifier:
                         'raw': item_text.strip()[:200]
                     })
             if found_items:
-                break  # 결과 있으면 다음 selector 스킵
+                break
 
-        # ===== 방법 3: 전체 HTML에서 정규식 추출 (최종 fallback) =====
+        # ===== 방법 3: div 기반 파싱 (AJAX 응답 fragment 대응) =====
         if not found_items:
-            print("[!] 테이블/리스트 파싱 실패. 전체 텍스트에서 정규식 추출 시도.")
-            # 제목 패턴과 날짜가 같은 블록에 있는 경우
+            # 날짜 패턴을 포함하는 모든 요소를 찾아서 근처 <a> 태그와 매칭
+            for elem in soup.find_all(string=re.compile(r'\d{4}[-./]\d{1,2}[-./]\d{1,2}')):
+                date_match = re.search(r'(\d{4}[-./]\d{1,2}[-./]\d{1,2})', str(elem))
+                if not date_match:
+                    continue
+                date_text = self._normalize_date(date_match.group(1))
+
+                # 부모 요소에서 <a> 태그 검색
+                parent = elem.parent
+                for _ in range(5):  # 최대 5단계 상위까지 탐색
+                    if parent is None:
+                        break
+                    link = parent.find('a')
+                    if link:
+                        title = link.get_text(strip=True)
+                        if title and len(title) > 2:
+                            found_items.append({
+                                'title': title,
+                                'date': date_text,
+                                'raw': parent.get_text(strip=True)[:200]
+                            })
+                            break
+                    parent = parent.parent
+
+        # ===== 방법 4: 전체 HTML에서 정규식 추출 (최종 fallback) =====
+        if not found_items:
+            print("[!] 구조화된 파싱 실패. 전체 텍스트에서 정규식 추출 시도.")
             text_blocks = re.split(r'\n{2,}|<br\s*/?>|</?(?:div|li|tr)[^>]*>', html)
             for block in text_blocks:
                 clean = BeautifulSoup(block, 'html.parser').get_text(strip=True)
@@ -279,47 +323,44 @@ class LandTransactionNotifier:
                         'raw': clean[:200]
                     })
 
-        # ===== 필터링: 검색어 + 날짜 매칭 =====
-        results = []
+        # ===== 중복 제거 =====
+        seen = set()
+        unique_items = []
         for item in found_items:
-            # 날짜 필터: target_dates 중 하나와 매칭
-            if item['date'] not in target_dates:
-                continue
-            results.append(item)
+            key = (item['title'], item['date'])
+            if key not in seen:
+                seen.add(key)
+                unique_items.append(item)
+
+        # ===== 필터링: 날짜 매칭 =====
+        results = []
+        for item in unique_items:
+            if item['date'] in target_dates:
+                results.append(item)
 
         return results
 
     def _detect_column_mapping(self, header_row) -> dict:
-        """
-        헤더 행의 th 텍스트를 분석하여 제목/날짜 컬럼 인덱스 추정.
-        
-        [근거] 공공기관 게시판 헤더는 보통:
-        번호 | 제목 | 부서 | 등록일(작성일/생성일) | 조회수
-        """
+        """헤더 행의 th 텍스트를 분석하여 제목/날짜 컬럼 인덱스 추정."""
         col_map = {'title_idx': None, 'date_idx': None}
         if not header_row:
             return col_map
-        
+
         headers = header_row.find_all(['th', 'td'])
         for i, h in enumerate(headers):
             text = h.get_text(strip=True)
-            if text in ('제목', '정보목록명', '내용', '결정서명칭', '제 목'):
+            if text in ('제목', '정보목록명', '내용', '결정서명칭', '제 목', '문서제목'):
                 col_map['title_idx'] = i
             elif text in ('등록일', '작성일', '생성일', '날짜', '일자', '공개일', '게시일'):
                 col_map['date_idx'] = i
-        
-        # 기본값: 제목은 2번째(idx 1), 날짜는 뒤쪽
+
         if col_map['title_idx'] is None:
             col_map['title_idx'] = 1
-        
+
         return col_map
 
     def _normalize_date(self, date_str: str) -> str:
-        """
-        다양한 날짜 형식을 YYYY-MM-DD로 정규화.
-        예: 2025.02.10 → 2025-02-10, 2025/2/10 → 2025-02-10
-        """
-        # 구분자 통일
+        """다양한 날짜 형식을 YYYY-MM-DD로 정규화."""
         normalized = date_str.replace('.', '-').replace('/', '-')
         parts = normalized.split('-')
         if len(parts) == 3:
@@ -335,21 +376,14 @@ class LandTransactionNotifier:
         print(f"[실행] 검색어: '{search_keyword}'")
         print(f"[실행] 대상 날짜: {target_dates}")
 
-        # =====================================================================
-        # [핵심 수정 3] 1페이지에서 세션 초기화 후 검색
-        # 
-        # 일부 공공기관 사이트는 메인 페이지 접속 없이 바로 검색하면 
-        # 세션/쿠키 미설정으로 빈 결과를 반환함.
-        # =====================================================================
-        
-        # 세션 초기화: 메인 페이지 먼저 접속
+        # 세션 초기화: 메인 페이지 먼저 접속하여 쿠키/세션 설정
         try:
             init_url = f"{self.base_url}?menuIdx={self.menu_idx}"
             self.session.get(init_url, timeout=10, verify=False)
             print("[*] 세션 초기화 완료")
         except Exception as e:
             print(f"[!] 세션 초기화 실패 (계속 진행): {e}")
-        
+
         # 검색 실행
         html = self.fetch_page(search_keyword)
         if not html:
@@ -358,24 +392,18 @@ class LandTransactionNotifier:
             )
             return
 
-        # =====================================================================
-        # [디버깅용] HTML 일부 출력 - 문제 진단에 필수
-        # GitHub Actions 로그에서 확인 가능
-        # =====================================================================
+        # 디버깅 출력
         print(f"\n[DEBUG] HTML 길이: {len(html)}")
         print(f"[DEBUG] 'table' 태그 수: {html.lower().count('<table')}")
         print(f"[DEBUG] '<tr>' 태그 수: {html.lower().count('<tr')}")
         print(f"[DEBUG] '<td>' 태그 수: {html.lower().count('<td')}")
-        
-        # 검색어가 HTML에 포함되어 있는지 확인
+
         if search_keyword in html:
-            print(f"[DEBUG] 검색어 '{search_keyword}'가 응답 HTML에 포함됨 ✓")
+            print(f"[DEBUG] 검색어 '{search_keyword}'가 응답 HTML에 포함됨")
         else:
-            print(f"[DEBUG] 검색어 '{search_keyword}'가 응답 HTML에 없음 ✗")
-            # 검색이 실제로 안 된 것일 수 있음
-            print("[DEBUG] 검색 파라미터가 올바른지 확인 필요")
-        
-        # 첫 번째 테이블의 처음 5행 출력 (구조 파악용)
+            print(f"[DEBUG] 검색어 '{search_keyword}'가 응답 HTML에 없음")
+
+        # 첫 번째 테이블 구조 출력
         soup = BeautifulSoup(html, 'html.parser')
         table = soup.find('table')
         if table:
@@ -385,27 +413,17 @@ class LandTransactionNotifier:
                 cells = row.find_all(['th', 'td'])
                 cell_texts = [c.get_text(strip=True)[:40] for c in cells]
                 print(f"  행{i}: {cell_texts}")
-        else:
-            print("[DEBUG] <table> 태그를 찾을 수 없음!")
-            # div/ul 구조 확인
-            lists = soup.find_all('ul')
-            print(f"[DEBUG] <ul> 태그 수: {len(lists)}")
-            for ul in lists[:3]:
-                items = ul.find_all('li')[:3]
-                for li in items:
-                    print(f"  li: {li.get_text(strip=True)[:80]}")
-        
-        # HTML 앞부분 500자 출력 (전체 구조 파악)
+
+        # HTML 앞/뒷부분 출력
         print(f"\n[DEBUG] HTML 앞부분 500자:\n{html[:500]}")
         print(f"\n[DEBUG] HTML 뒷부분 500자:\n{html[-500:]}")
-        
+
         # 파싱 실행
         results = self.parse_results(html, target_dates)
 
         if not results:
             print(f"[결과] 대상 날짜 {target_dates} 기준 신규 내역 없음.")
-            # 모든 파싱 결과 (날짜 무관) 출력하여 진단
-            all_results = self.parse_results(html, 
+            all_results = self.parse_results(html,
                 [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(30)]
             )
             if all_results:
