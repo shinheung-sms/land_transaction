@@ -4,6 +4,10 @@ from datetime import datetime, timedelta
 import sys
 import time
 import os
+import urllib3
+
+# SSL 인증서 검증 경고 숨기기
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class LandTransactionNotifier:
     def __init__(self, telegram_token: str, chat_id: str):
@@ -47,7 +51,8 @@ class LandTransactionNotifier:
 
         try:
             # 타임아웃 10초 설정
-            response = requests.get(self.base_url, params=params, timeout=10)
+            # verify=False: 공공기관 사이트의 SSL 인증서 오류 방지를 위해 검증 비활성화
+            response = requests.get(self.base_url, params=params, timeout=10, verify=False)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             print(f"[오류] 접속 실패: {e}")
