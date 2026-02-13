@@ -47,6 +47,11 @@ class LandTransactionNotifier:
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
             print(f"[전송 성공] {message[:50]}...")
+        except requests.exceptions.HTTPError as e:
+            # 텔레그램 API 에러 상세 출력 (토큰/채팅ID 오류 진단용)
+            error_body = e.response.text if e.response else "응답 없음"
+            print(f"[전송 실패] {e}")
+            print(f"[전송 실패 상세] {error_body}")
         except Exception as e:
             print(f"[전송 실패] {e}")
 
