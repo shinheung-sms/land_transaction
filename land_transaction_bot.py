@@ -56,13 +56,10 @@ class LandTransactionNotifier:
             print(f"[전송 실패] {e}")
 
     def get_target_dates(self) -> list:
-        """오늘 + 최근 3일치 날짜를 반환 (YYYY-MM-DD 형식)."""
-        dates = []
-        for i in range(1, 4):
-            d = datetime.now() - timedelta(days=i)
-            dates.append(d.strftime("%Y-%m-%d"))
-        dates.insert(0, datetime.now().strftime("%Y-%m-%d"))
-        return dates
+        """당일 + 전일 날짜를 반환 (YYYY-MM-DD 형식)."""
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        return [today.strftime("%Y-%m-%d"), yesterday.strftime("%Y-%m-%d")]
 
     def _build_search_payload(self, keyword: str, from_date: str, to_date: str,
                               offset: int = 1, count: int = 10) -> dict:
@@ -178,9 +175,9 @@ class LandTransactionNotifier:
         print(f"[실행] 검색어: '{search_keyword}'")
         print(f"[실행] 대상 날짜: {target_dates}")
 
-        # 검색 기간: 최근 31일 (여유 있게)
+        # 검색 기간: 전일 ~ 당일
         to_date = datetime.now().strftime("%Y.%m.%d")
-        from_date = (datetime.now() - timedelta(days=31)).strftime("%Y.%m.%d")
+        from_date = (datetime.now() - timedelta(days=1)).strftime("%Y.%m.%d")
         print(f"[실행] 검색 기간: {from_date} ~ {to_date}")
 
         # API 호출
