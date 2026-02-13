@@ -169,10 +169,29 @@ class LandTransactionNotifier:
             return f"{regdate[:4]}-{regdate[4:6]}-{regdate[6:8]}"
         return regdate
 
-    def run(self, search_keyword: str):
-        """메인 실행 로직"""
+    def _extract_dong_ho(self, title: str) -> tuple:
+        """제목에서 동/호수 정보를 추출.
+
+        Returns:
+            (동, 호수) 튜플. 추출 실패 시 빈 문자열.
+        """
+        dong = ""
+        ho = ""
+        dong_match = re.search(r'(\d+)\s*동', title)
+        if dong_match:
+            dong = f"{dong_match.group(1)}동"
+        ho_match = re.search(r'(\d+)\s*호', title)
+        if ho_match:
+            ho = f"{ho_match.group(1)}호"
+        return dong, ho
+
+    def run(self, search_targets: list):
+        """메인 실행 로직
+
+        Args:
+            search_targets: [(검색키워드, 아파트명), ...] 리스트
+        """
         target_dates = self.get_target_dates()
-        print(f"[실행] 검색어: '{search_keyword}'")
         print(f"[실행] 대상 날짜: {target_dates}")
 
         # 검색 기간: 전일 ~ 당일
@@ -180,58 +199,74 @@ class LandTransactionNotifier:
         from_date = (datetime.now() - timedelta(days=1)).strftime("%Y.%m.%d")
         print(f"[실행] 검색 기간: {from_date} ~ {to_date}")
 
-        # API 호출
-        items = self.fetch_results(search_keyword, from_date, to_date)
+        all_csv_rows = []
+        total_found = 0
 
-        if not items:
-            print("[결과] 검색 결과 없음.")
-            return
+        for keyword, apt_name in search_targets:
+            print(f"\n[실행] 검색어: '{keyword}' (아파트: {apt_name})")
 
-        # 전체 결과 출력 (디버깅용)
-        print(f"\n[DEBUG] 전체 {len(items)}건:")
-        for item in items:
-            date_str = self._parse_regdate(item.get('REGDATE', ''))
-            title = re.sub(r'<[^>]+>', '', item.get('TITLE', ''))
-            print(f"  - [{date_str}] {title}")
+            # API 호출
+            items = self.fetch_results(keyword, from_date, to_date)
 
-        # 대상 날짜 필터링
-        results = []
-        for item in items:
-            date_str = self._parse_regdate(item.get('REGDATE', ''))
-            if date_str in target_dates:
-                results.append(item)
+            if not items:
+                print(f"[결과] '{keyword}' 검색 결과 없음.")
+                continue
 
-        if not results:
-            print(f"\n[결과] 대상 날짜 {target_dates} 기준 신규 내역 없음.")
-            return
+            # 전체 결과 출력 (디버깅용)
+            print(f"[DEBUG] 전체 {len(items)}건:")
+            for item in items:
+                date_str = self._parse_regdate(item.get('REGDATE', ''))
+                title = re.sub(r'<[^>]+>', '', item.get('TITLE', ''))
+                print(f"  - [{date_str}] {title}")
 
-        # 결과 전송
-        found_count = 0
-        for item in results:
-            date_str = self._parse_regdate(item.get('REGDATE', ''))
-            # HTML 하이라이트 태그 제거 후 특수문자 이스케이프
-            title = re.sub(r'<[^>]+>', '', item.get('TITLE', ''))
-            title = html_escape(title)
-            org_path = html_escape(item.get('GVRNPATH', ''))
+            # 대상 날짜 필터링
+            for item in items:
+                date_str = self._parse_regdate(item.get('REGDATE', ''))
+                if date_str not in target_dates:
+                    continue
 
-            message = (
-                f"🚨 <b>토지거래허가 신규 내역 감지</b>\n\n"
-                f"📅 <b>일자:</b> {date_str}\n"
-                f"📄 <b>내용:</b> {title}\n"
-                f"🏢 <b>부서:</b> {org_path}\n\n"
-                f"🔗 <a href='https://www.seongnam.go.kr/infoList/"
-                f"infoList2.do?menuIdx=1001802'>게시판 바로가기</a>"
-            )
-            self.send_telegram_message(message)
-            found_count += 1
+                # HTML 하이라이트 태그 제거 후 특수문자 이스케이프
+                raw_title = re.sub(r'<[^>]+>', '', item.get('TITLE', ''))
+                title = html_escape(raw_title)
+                org_path = html_escape(item.get('GVRNPATH', ''))
 
-        print(f"\n[결과] 총 {found_count}건의 알림을 전송했습니다.")
+                # 개별 알림 전송 (아파트명 포함)
+                message = (
+                    f"🚨 <b>토지거래허가 신규 내역 감지</b>\n\n"
+                    f"🏠 <b>아파트:</b> {html_escape(apt_name)}\n"
+                    f"📅 <b>일자:</b> {date_str}\n"
+                    f"📄 <b>내용:</b> {title}\n"
+                    f"🏢 <b>부서:</b> {org_path}\n\n"
+                    f"🔗 <a href='https://www.seongnam.go.kr/infoList/"
+                    f"infoList2.do?menuIdx=1001802'>게시판 바로가기</a>"
+                )
+                self.send_telegram_message(message)
+                total_found += 1
+
+                # CSV 요약용 동/호수 추출
+                dong, ho = self._extract_dong_ho(raw_title)
+                all_csv_rows.append(f"{date_str}, {apt_name}, {dong}, {ho}")
+
+        # 모든 검색 완료 후 CSV 요약 전송
+        if all_csv_rows:
+            csv_message = "\n".join(all_csv_rows)
+            self.send_telegram_message(csv_message)
+            print(f"\n[결과] 총 {total_found}건의 알림 + CSV 요약을 전송했습니다.")
+        else:
+            print(f"\n[결과] 전체 검색 대상에서 신규 내역 없음.")
 
 
 if __name__ == "__main__":
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', "YOUR_BOT_TOKEN_HERE")
     CHAT_ID = os.getenv('CHAT_ID', "YOUR_CHAT_ID_HERE")
-    SEARCH_QUERY = "중앙동 3001"
+
+    # 검색 대상: (검색용 주소지, 아파트명)
+    SEARCH_TARGETS = [
+        ("중앙동 912", "해링턴 스퀘어"),
+        ("중앙동 3001", "하늘채1단지"),
+        ("중앙동 3006", "하늘채2단지"),
+        ("중앙동 3007", "하늘채3단지"),
+    ]
 
     # 환경변수 로딩 확인 (값은 마스킹하여 출력)
     if TELEGRAM_TOKEN and TELEGRAM_TOKEN != "YOUR_BOT_TOKEN_HERE":
@@ -249,4 +284,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     scraper = LandTransactionNotifier(TELEGRAM_TOKEN, CHAT_ID)
-    scraper.run(SEARCH_QUERY)
+    scraper.run(SEARCH_TARGETS)
