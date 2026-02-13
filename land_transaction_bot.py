@@ -7,6 +7,7 @@ import time
 import random
 import urllib3
 from datetime import datetime, timedelta
+from html import escape as html_escape
 from urllib.parse import quote
 
 # SSL 인증서 검증 경고 숨기기
@@ -206,10 +207,10 @@ class LandTransactionNotifier:
         found_count = 0
         for item in results:
             date_str = self._parse_regdate(item.get('REGDATE', ''))
-            # HTML 태그 제거 (하이라이트 태그 등)
+            # HTML 하이라이트 태그 제거 후 특수문자 이스케이프
             title = re.sub(r'<[^>]+>', '', item.get('TITLE', ''))
-            dept = item.get('DEPTNM', '')
-            org_path = item.get('GVRNPATH', '')
+            title = html_escape(title)
+            org_path = html_escape(item.get('GVRNPATH', ''))
 
             message = (
                 f"🚨 <b>토지거래허가 신규 내역 감지</b>\n\n"
