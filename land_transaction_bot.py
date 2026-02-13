@@ -236,8 +236,19 @@ if __name__ == "__main__":
     CHAT_ID = os.getenv('CHAT_ID', "YOUR_CHAT_ID_HERE")
     SEARCH_QUERY = "중앙동 3001"
 
-    if TELEGRAM_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("오류: 텔레그램 봇 토큰을 설정해주세요.")
+    # 환경변수 로딩 확인 (값은 마스킹하여 출력)
+    if TELEGRAM_TOKEN and TELEGRAM_TOKEN != "YOUR_BOT_TOKEN_HERE":
+        print(f"[설정] TELEGRAM_TOKEN 로드 완료 (길이: {len(TELEGRAM_TOKEN)}, 앞4자: {TELEGRAM_TOKEN[:4]}...)")
+    else:
+        print("오류: TELEGRAM_TOKEN 환경변수가 설정되지 않았습니다.")
+        print("GitHub 저장소 Settings > Secrets에 TELEGRAM_TOKEN을 등록해주세요.")
+        sys.exit(1)
+
+    if CHAT_ID and CHAT_ID != "YOUR_CHAT_ID_HERE":
+        print(f"[설정] CHAT_ID 로드 완료 (값: {CHAT_ID})")
+    else:
+        print("오류: CHAT_ID 환경변수가 설정되지 않았습니다.")
+        print("GitHub 저장소 Settings > Secrets에 CHAT_ID를 등록해주세요.")
         sys.exit(1)
 
     scraper = LandTransactionNotifier(TELEGRAM_TOKEN, CHAT_ID)
